@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JSON ↔ YAML Converter</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      padding: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+      background: #fafafa;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+    .subtitle {
+      text-align: center;
+      color: #7f8c8d;
+      margin-bottom: 24px;
+      font-size: 0.95em;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    @media (min-width: 768px) {
+      .container { flex-direction: row; }
+    }
+    .panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .panel-title {
+      font-weight: 600;
+      color: #2c3e50;
+    }
+    .label {
+      background: #ecf0f1;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      font-family: monospace;
+    }
+    textarea {
+      width: 100%;
+      height: 300px;
+      padding: 12px;
+      border: 2px solid #bdc3c7;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 14px;
+      resize: vertical;
+      transition: border-color 0.2s;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #3498db;
+    }
+    .error { border-color: #e74c3c !important; }
+    .error-msg {
+      color: #e74c3c;
+      font-size: 0.85em;
+      margin-top: 4px;
+      min-height: 1.4em;
+    }
+    .copy-btn {
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 0.85em;
+      transition: background 0.2s;
+    }
+    .copy-btn:hover { background: #2980b9; }
+    .copy-btn:disabled {
+      background: #95a5a6;
+      cursor: not-allowed;
+    }
+    .footer {
+      margin-top: 30px;
+      text-align: center;
+      font-size: 0.85em;
+      color: #95a5a6;
+    }
+    .footer a { color: #3498db; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>JSON ↔ YAML Converter</h1>
+  <p class="subtitle">Zero-install • Runs in browser • State in URL</p>
+
+  <div class="container">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Input</span>
+        <span class="label" id="input-label">JSON</span>
+      </div>
+      <textarea id="input" placeholder="Paste JSON or YAML here..."></textarea>
+      <div class="error-msg" id="input-error"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Output</span>
+        <button class="copy-btn" id="copy-btn" disabled>Copy</button>
+      </div>
+      <textarea id="output" readonly placeholder="Converted result appears here..."></textarea>
+      <div class="error-msg" id="output-error"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Inspired by Simon's single-HTML tools • <a href="https://github.com/kentmai/json-yaml-converter" target="_blank">GitHub</a>
+  </div>
+
+  <script>
+    const inputEl = document.getElementById('input');
+    const outputEl = document.getElementById('output');
+    const inputErrorEl = document.getElementById('input-error');
+    const outputErrorEl = document.getElementById('output-error');
+    const copyBtn = document.getElementById('copy-btn');
+    const inputLabel = document.getElementById('input-label');
+
+    // Auto-save to localStorage every 2s (debounced)
+    let saveTimer;
+    const saveToStorage = () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        localStorage.setItem('json-yaml-input', inputEl.value);
+      }, 2000);
+    };
+
+    // Load from localStorage on init
+    (() => {
+      const saved = localStorage.getItem('json-yaml-input');
+      if (saved) inputEl.value = saved;
+
+      // Also try loading from URL hash (for sharing)
+      if (window.location.hash) {
+        try {
+          const decoded = decodeURIComponent(window.location.hash.slice(1));
+          if (decoded) inputEl.value = decoded;
+        } catch (e) {}
+      }
+      convert();
+    })();
+
+    const updateURL = () => {
+      const hash = encodeURIComponent(inputEl.value.trim());
+      history.replaceState(null, '', hash ? `#${hash}` : '#');
+    };
+
+    const setError = (el, msg) => {
+      el.textContent = msg || '';
+      el.previousElementSibling.classList.toggle('error', !!msg);
+    };
+
+    const convert = () => {
+      const text = inputEl.value.trim();
+      inputErrorEl.textContent = '';
+      outputErrorEl.textContent = '';
+      inputEl.classList.remove('error');
+      outputEl.classList.remove('error');
+      copyBtn.disabled = true;
+
+      if (!text) {
+        outputEl.value = '';
+        return;
+      }
+
+      // Try JSON → YAML
+      try {
+        const obj = JSON.parse(text);
+        inputLabel.textContent = 'JSON';
+        outputEl.value = jsyaml.dump(obj, { indent: 2, noRefs: true });
+        outputEl.classList.remove('error');
+        copyBtn.disabled = false;
+        return;
+      } catch (e1) {
+        // Not JSON? Try YAML → JSON
+        try {
+          const obj = jsyaml.load(text);
+          inputLabel.textContent = 'YAML';
+          outputEl.value = JSON.stringify(obj, null, 2);
+          outputEl.classList.remove('error');
+          copyBtn.disabled = false;
+          return;
+        } catch (e2) {
+          // Neither valid
+          setError(inputErrorEl, 'Invalid JSON or YAML');
+          outputEl.value = '';
+          return;
+        }
+      }
+    };
+
+    inputEl.addEventListener('input', () => {
+      convert();
+      saveToStorage();
+      updateURL();
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(outputEl.value);
+        const original = copyBtn.textContent;
+        copyBtn.textContent = '✓ Copied!';
+        setTimeout(() => copyBtn.textContent = original, 1500);
+      } catch (err) {
+        console.error('Copy failed:', err);
+      }
+    });
+  </script>
+</body>
+</html>
